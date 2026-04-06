@@ -889,6 +889,10 @@
           <span class="mero-dot red"></span> Neconectat
         </div>
         <div style="margin-bottom:12px;">
+          <label class="form-label" style="margin-top:0;">URL Proxy</label>
+          <input type="text" class="form-input" id="meroProxy" placeholder="https://mero-proxy.xxxxx.workers.dev" style="font-size:0.8rem;">
+        </div>
+        <div style="margin-bottom:12px;">
           <label class="form-label" style="margin-top:0;">Token Bearer</label>
           <input type="password" class="form-input" id="meroToken" placeholder="Lipește token-ul aici..." style="font-size:0.8rem;">
           <div style="font-size:0.68rem;color:var(--muted);margin-top:6px;">
@@ -918,28 +922,35 @@
       </div>
 
       <div id="meroGuide" style="margin-top:20px;">
-        <div class="section-title">CUM IADEI TOKEN-UL?</div>
+        <div class="section-title">SETUP (O SINGURĂ DATĂ)</div>
         <div class="mero-guide-steps">
           <div class="mero-step">
             <span class="mero-step-nr">1</span>
-            <span>Deschide <strong>app.mero.co</strong> în Chrome și loghează-te</span>
+            <span>Intră pe <strong>workers.cloudflare.com</strong> → Sign Up (cont gratuit)</span>
           </div>
           <div class="mero-step">
             <span class="mero-step-nr">2</span>
-            <span>Apasă <strong>F12</strong> (sau Fn+F12) → tab <strong>Network</strong></span>
+            <span>Dashboard → <strong>Workers & Pages</strong> → <strong>Create</strong> → <strong>Create Worker</strong></span>
           </div>
           <div class="mero-step">
             <span class="mero-step-nr">3</span>
-            <span>Navighează prin Mero (deschide rapoarte)</span>
+            <span>Dă-i un nume (ex: <strong>mero-proxy</strong>) → <strong>Deploy</strong> → apoi <strong>Edit Code</strong></span>
           </div>
           <div class="mero-step">
             <span class="mero-step-nr">4</span>
-            <span>Click pe orice cerere → <strong>Headers</strong> → copiază valoarea de la <strong>Authorization</strong></span>
+            <span>Șterge tot codul existent și lipește codul proxy (vezi fișierul <strong>worker.js</strong>)</span>
           </div>
           <div class="mero-step">
             <span class="mero-step-nr">5</span>
-            <span>Lipește aici (doar textul după "Bearer ")</span>
+            <span>Apasă <strong>Save and Deploy</strong> → copiază URL-ul (ex: <strong>mero-proxy.xxx.workers.dev</strong>)</span>
           </div>
+          <div class="mero-step">
+            <span class="mero-step-nr">6</span>
+            <span>Lipește URL-ul proxy sus + token-ul Bearer din Mero DevTools</span>
+          </div>
+        </div>
+        <div style="margin-top:12px;font-size:0.75rem;color:var(--muted);">
+          ℹ️ Proxy-ul e gratuit (100.000 cereri/zi), fără card, token-ul ține 6 luni.
         </div>
       </div>
     </div><!-- /adminMero -->
@@ -2566,14 +2577,17 @@ async function meroFetch(endpoint, params){
   if(params){
     url+='?'+Object.keys(params).map(function(k){ return k+'='+encodeURIComponent(params[k]); }).join('&');
   }
-  // Use CORS proxy to bypass browser restrictions
-  var proxyUrl='https://corsproxy.io/?'+encodeURIComponent(url);
-  var resp=await fetch(proxyUrl, { headers:{ 'Authorization':'Bearer '+token } });
+  var proxyBase='https://thecellmero.birispatryk2.workers.dev';
+  var proxyUrl=proxyBase+'?url='+encodeURIComponent(url)+'&token='+encodeURIComponent(token);
+  var resp=await fetch(proxyUrl);
   if(resp.status===401||resp.status===403){
     updateMeroStatus('red','Token expirat! Reînnoire necesară.');
     throw new Error('Token expirat');
   }
-  if(!resp.ok) throw new Error('Eroare Mero: '+resp.status);
+  if(!resp.ok){
+    var errText=''; try { errText=await resp.text(); } catch(e){}
+    throw new Error('Eroare proxy: '+resp.status);
+  }
   return resp.json();
 }
 
@@ -2785,29 +2799,41 @@ async function loadMeroDailyData(){
 
 function initMeroTab(){
   var savedToken=getMeroToken();
+  var savedProxy=localStorage.getItem('meroProxyUrl')||'';
   if(savedToken){
     document.getElementById('meroToken').value=savedToken;
-    updateMeroStatus('warn','Token salvat — apasă Sincronizează');
+  }
+  if(savedProxy){
+    document.getElementById('meroProxy').value=savedProxy;
+  }
+  if(savedToken&&savedProxy){
+    updateMeroStatus('warn','Setat — apasă Sincronizează');
     document.getElementById('meroSelectMonth').style.display='block';
   }
   updateMeroMonthLabel();
 
   document.getElementById('meroSaveToken').addEventListener('click',function(){
+    var proxy=document.getElementById('meroProxy').value.trim();
     var token=document.getElementById('meroToken').value.trim();
     if(token.toLowerCase().startsWith('bearer ')) token=token.slice(7);
+    if(!proxy){ toast('Lipește URL-ul proxy!','warning'); return; }
     if(!token){ toast('Lipește token-ul!','warning'); return; }
+    localStorage.setItem('meroProxyUrl', proxy);
     setMeroToken(token);
     document.getElementById('meroToken').value=token;
-    updateMeroStatus('warn','Token salvat — testare...');
+    updateMeroStatus('warn','Salvat — testare...');
     document.getElementById('meroSelectMonth').style.display='block';
     meroTestConnection();
   });
 
   document.getElementById('meroSync').addEventListener('click',async function(){
+    var proxy=document.getElementById('meroProxy').value.trim();
     var token=document.getElementById('meroToken').value.trim();
     if(token.toLowerCase().startsWith('bearer ')) token=token.slice(7);
+    if(proxy) localStorage.setItem('meroProxyUrl', proxy);
     if(token) setMeroToken(token);
     if(!getMeroToken()){ toast('Lipește token-ul!','warning'); return; }
+    if(!localStorage.getItem('meroProxyUrl')){ toast('Lipește URL-ul proxy!','warning'); return; }
     var ok=await meroTestConnection();
     if(ok){
       document.getElementById('meroSelectMonth').style.display='block';
