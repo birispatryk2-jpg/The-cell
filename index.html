@@ -4198,7 +4198,6 @@ showBarberView=async function(){
 async function barberMeroSyncClick(){
   var token=getMeroToken();
   if(!token){
-    // Încercăm din localStorage
     token=localStorage.getItem('meroToken')||'';
     if(!token){
       toast('Cere admin-ului token-ul Mero sau setează-l în tab-ul Mero (admin)','warning');
@@ -4209,7 +4208,6 @@ async function barberMeroSyncClick(){
   if(btn){ btn.disabled=true; btn.textContent='⏳ Se sincronizează...'; }
 
   try {
-    // Find this barber's Mero worker ID
     var wId=null;
     var bName=(barberData.name||'').toLowerCase();
     var wMap={'florin':'65564d838fcbe845d716ebe7','casian':'6495e557f7354746387582dc',
@@ -4217,71 +4215,125 @@ async function barberMeroSyncClick(){
       'nichitut':'632894e65e4e0cf7d4f9743f','nichituț':'632894e65e4e0cf7d4f9743f',
       'patrick':'5da8bbe641ae460c8a5f06e5'};
     for(var k in wMap){ if(bName.indexOf(k)!==-1){ wId=wMap[k]; break; } }
-
     if(!wId){ toast('Nu s-a găsit frizerul în Mero','error'); return; }
 
-    // Get monthly data
+    var isPatrick=bName.indexOf('patrick')!==-1;
     var monthKey=viewMonth;
     var p=monthKey.split('-'), yr=parseInt(p[0]), mo=parseInt(p[1]);
-    var from=yr+'-'+String(mo).padStart(2,'0')+'-01T00:00:00.000Z';
     var lastDay=new Date(yr,mo,0).getDate();
-    var to=yr+'-'+String(mo).padStart(2,'0')+'-'+lastDay+'T23:59:59.999Z';
+    var fromMonth=yr+'-'+String(mo).padStart(2,'0')+'-01T00:00:00.000Z';
+    var toMonth=yr+'-'+String(mo).padStart(2,'0')+'-'+lastDay+'T23:59:59.999Z';
 
-    var resp=await meroPost(meroStatsUrl(from,to,wId));
-    var result=resp.result;
-    if(!result||!result.bookings){
+    // Ziua curentă
+    var today=new Date().toISOString().slice(0,10);
+    var fromToday=today+'T00:00:00.000Z';
+    var toToday=today+'T23:59:59.999Z';
+
+    // Fetch lunar + azi în paralel
+    var monthResp=await meroPost(meroStatsUrl(fromMonth,toMonth,wId));
+    var todayResp=null;
+    try { todayResp=await meroPost(meroStatsUrl(fromToday,toToday,wId)); } catch(e){}
+
+    var mResult=monthResp.result;
+    var tResult=todayResp?todayResp.result:null;
+    if(!mResult||!mResult.bookings){
       toast('Nu sunt date Mero pentru luna asta','info');
       document.getElementById('barberMeroBox').style.display='none';
       return;
     }
 
-    var meroIncome=result.bookings.finishedStats.income||0;
-    var meroCount=result.bookings.finishedStats.count||0;
-    var avgVal=result.clients?result.clients.averageBookingValue:0;
+    var meroMonth_=mResult.bookings.finishedStats.income||0;
+    var meroMonthCount=mResult.bookings.finishedStats.count||0;
+    var meroToday_=tResult&&tResult.bookings?tResult.bookings.finishedStats.income:0;
+    var meroTodayCount=tResult&&tResult.bookings?tResult.bookings.finishedStats.count:0;
 
-    // Get app entries for comparison
-    var snap=await getDocs(query(collection(db,'entries'),where('barberId','==',currentUser.uid),where('month','==',monthKey)));
-    var appTotal=0;
-    snap.forEach(function(d){ appTotal+=d.data().amount; });
+    // App entries - lunar
+    var snapMonth=await getDocs(query(collection(db,'entries'),where('barberId','==',currentUser.uid),where('month','==',monthKey)));
+    var appMonthTotal=0;
+    snapMonth.forEach(function(d){ appMonthTotal+=d.data().amount; });
 
-    // Calculate breakdown
-    var bd=calcMeroBreakdown(meroIncome, barberData);
-    var isPatrick=bName.indexOf('patrick')!==-1;
+    // App entries - azi
+    var snapToday=await getDocs(query(collection(db,'entries'),where('barberId','==',currentUser.uid),where('date','==',today)));
+    // Dacă luna selectată nu e luna curentă, nu arătăm azi
+    var isCurrentMonth=monthKey===new Date().toISOString().slice(0,7);
+    var appTodayTotal=0;
+    snapToday.forEach(function(d){ appTodayTotal+=d.data().amount; });
 
-    // Build suggestion HTML
+    // Breakdown lunar
+    var bdMonth=calcMeroBreakdown(meroMonth_, barberData);
+    // Breakdown azi
+    var bdToday=calcMeroBreakdown(meroToday_, barberData);
+    // Ce trebuia azi admin share
+    var todayAdminShare=isPatrick?meroToday_:bdToday.adminShare;
+    var todayDiff=appTodayTotal-todayAdminShare;
+    // Ce trebuia lunar admin share
+    var monthAdminShare=isPatrick?meroMonth_:bdMonth.adminShare;
+    var monthDiff=appMonthTotal-monthAdminShare;
+
+    // Format date frumos
+    var todayParts=today.split('-');
+    var todayLabel=todayParts[2]+'.'+todayParts[1]+'.'+todayParts[0];
+
     var box=document.getElementById('barberMeroBox');
     var sugEl=document.getElementById('barberMeroSuggestion');
     box.style.display='block';
 
-    var diff=appTotal-bd.adminShare;
-    var diffText='';
-    if(Math.abs(diff)<1){
-      diffText='<span style="color:var(--green);font-weight:700;">✓ Totul e corect!</span>';
-    } else if(diff>0){
-      diffText='<span style="color:var(--gold);">Ai introdus '+fmt(diff)+' în plus față de ce arată Mero.</span>';
-    } else {
-      diffText='<span style="color:var(--red);font-weight:700;">Mai ai de introdus '+fmt(Math.abs(diff))+'</span>';
+    var html='';
+
+    // ── SECȚIUNEA AZI ──
+    if(isCurrentMonth && meroToday_>0){
+      html+='<div style="background:rgba(96,165,250,0.1);border-radius:10px;padding:12px;margin-bottom:12px;">';
+      html+='<div style="font-weight:700;font-size:0.95rem;margin-bottom:8px;">📅 Azi — '+todayLabel+'</div>';
+      html+='<div style="display:flex;gap:8px;margin-bottom:8px;">';
+      html+='<div style="flex:1;text-align:center;background:rgba(255,255,255,0.08);border-radius:8px;padding:6px;"><div style="font-size:0.5rem;text-transform:uppercase;letter-spacing:1px;opacity:0.7;">Mero azi</div><div style="font-family:Bebas Neue;font-size:1.2rem;">'+fmt(meroToday_)+'</div></div>';
+      html+='<div style="flex:1;text-align:center;background:rgba(255,255,255,0.08);border-radius:8px;padding:6px;"><div style="font-size:0.5rem;text-transform:uppercase;letter-spacing:1px;opacity:0.7;">'+(isPatrick?'De introdus':'Partea admin')+'</div><div style="font-family:Bebas Neue;font-size:1.2rem;color:var(--green);">'+fmt(todayAdminShare)+'</div></div>';
+      if(!isPatrick){
+        html+='<div style="flex:1;text-align:center;background:rgba(255,255,255,0.08);border-radius:8px;padding:6px;"><div style="font-size:0.5rem;text-transform:uppercase;letter-spacing:1px;opacity:0.7;">Câștigul tău</div><div style="font-family:Bebas Neue;font-size:1.2rem;color:var(--blue);">'+fmt(bdToday.barberShare)+'</div></div>';
+      }
+      html+='</div>';
+      html+='<div style="font-size:0.82rem;">Ai introdus azi: <strong>'+fmt(appTodayTotal)+'</strong></div>';
+      // Diferența azi
+      if(Math.abs(todayDiff)<1){
+        html+='<div style="color:var(--green);font-weight:700;font-size:0.9rem;margin-top:4px;">✓ Ziua e completă!</div>';
+      } else if(todayDiff<0){
+        html+='<div style="color:var(--red);font-weight:700;font-size:0.9rem;margin-top:4px;">⚠ Mai ai de introdus '+fmt(Math.abs(todayDiff))+' pentru azi</div>';
+      } else {
+        html+='<div style="color:var(--gold);font-size:0.85rem;margin-top:4px;">Ai '+fmt(todayDiff)+' în plus azi</div>';
+      }
+      html+='<div style="font-size:0.72rem;opacity:0.6;margin-top:2px;">'+meroTodayCount+' programări finalizate azi</div>';
+      html+='</div>';
+    } else if(isCurrentMonth){
+      html+='<div style="background:rgba(96,165,250,0.1);border-radius:10px;padding:12px;margin-bottom:12px;">';
+      html+='<div style="font-weight:700;font-size:0.95rem;margin-bottom:4px;">📅 Azi — '+todayLabel+'</div>';
+      html+='<div style="font-size:0.85rem;color:var(--muted2);">Nicio programare finalizată încă azi.</div>';
+      html+='</div>';
     }
 
-    var html='<div style="font-weight:700;margin-bottom:8px;">📱 Date Mero — '+MONTHS[mo-1]+' '+yr+'</div>';
+    // ── SECȚIUNEA LUNARĂ ──
+    html+='<div style="font-weight:700;font-size:0.95rem;margin-bottom:8px;">📊 Total '+MONTHS[mo-1]+' '+yr+'</div>';
     html+='<div style="display:flex;gap:8px;margin-bottom:8px;">';
-    html+='<div style="flex:1;text-align:center;background:rgba(96,165,250,0.08);border-radius:8px;padding:6px;"><div style="font-size:0.55rem;text-transform:uppercase;letter-spacing:1px;opacity:0.7;">Mero brut</div><div style="font-family:Bebas Neue;font-size:1.1rem;">'+fmt(meroIncome)+'</div></div>';
+    html+='<div style="flex:1;text-align:center;background:rgba(96,165,250,0.08);border-radius:8px;padding:6px;"><div style="font-size:0.5rem;text-transform:uppercase;letter-spacing:1px;opacity:0.7;">Mero brut</div><div style="font-family:Bebas Neue;font-size:1.1rem;">'+fmt(meroMonth_)+'</div></div>';
+    html+='<div style="flex:1;text-align:center;background:rgba(74,222,128,0.08);border-radius:8px;padding:6px;"><div style="font-size:0.5rem;text-transform:uppercase;letter-spacing:1px;opacity:0.7;">'+(isPatrick?'Total (100%)':'Partea admin')+'</div><div style="font-family:Bebas Neue;font-size:1.1rem;color:var(--green);">'+fmt(monthAdminShare)+'</div></div>';
     if(!isPatrick){
-      html+='<div style="flex:1;text-align:center;background:rgba(74,222,128,0.08);border-radius:8px;padding:6px;"><div style="font-size:0.55rem;text-transform:uppercase;letter-spacing:1px;opacity:0.7;">Admin (de introdus)</div><div style="font-family:Bebas Neue;font-size:1.1rem;color:var(--green);">'+fmt(bd.adminShare)+'</div></div>';
-      html+='<div style="flex:1;text-align:center;background:rgba(96,165,250,0.08);border-radius:8px;padding:6px;"><div style="font-size:0.55rem;text-transform:uppercase;letter-spacing:1px;opacity:0.7;">Câștigul tău</div><div style="font-family:Bebas Neue;font-size:1.1rem;color:var(--blue);">'+fmt(bd.barberShare)+'</div></div>';
-    } else {
-      html+='<div style="flex:1;text-align:center;background:rgba(74,222,128,0.08);border-radius:8px;padding:6px;"><div style="font-size:0.55rem;text-transform:uppercase;letter-spacing:1px;opacity:0.7;">Total (100%)</div><div style="font-family:Bebas Neue;font-size:1.1rem;color:var(--green);">'+fmt(meroIncome)+'</div></div>';
+      html+='<div style="flex:1;text-align:center;background:rgba(96,165,250,0.08);border-radius:8px;padding:6px;"><div style="font-size:0.5rem;text-transform:uppercase;letter-spacing:1px;opacity:0.7;">Câștigul tău</div><div style="font-family:Bebas Neue;font-size:1.1rem;color:var(--blue);">'+fmt(bdMonth.barberShare)+'</div></div>';
     }
     html+='</div>';
-    html+='<div style="font-size:0.78rem;margin-bottom:4px;">Prag: <strong>'+bd.prag+'</strong></div>';
-    html+='<div style="font-size:0.78rem;margin-bottom:4px;">Programări finalizate: <strong>'+meroCount+'</strong> · Medie: <strong>'+(avgVal?avgVal.toFixed(0):0)+' lei</strong></div>';
-    html+='<div style="font-size:0.78rem;margin-bottom:4px;">Ai introdus în app: <strong>'+fmt(appTotal)+'</strong></div>';
-    html+='<div style="font-size:0.85rem;margin-top:8px;padding-top:8px;border-top:1px solid rgba(96,165,250,0.2);">'+diffText+'</div>';
+    html+='<div style="font-size:0.78rem;margin-bottom:4px;">Prag: <strong>'+bdMonth.prag+'</strong> · Programări: <strong>'+meroMonthCount+'</strong></div>';
+    html+='<div style="font-size:0.78rem;margin-bottom:4px;">Ai introdus lunar: <strong>'+fmt(appMonthTotal)+'</strong> din <strong>'+fmt(monthAdminShare)+'</strong></div>';
 
-    // Services breakdown
-    if(result.services&&result.services.length){
+    // Diferența lunară
+    if(Math.abs(monthDiff)<1){
+      html+='<div style="color:var(--green);font-weight:700;font-size:0.9rem;margin-top:6px;padding-top:6px;border-top:1px solid rgba(96,165,250,0.2);">✓ Luna e completă — totul se potrivește!</div>';
+    } else if(monthDiff<0){
+      html+='<div style="color:var(--red);font-weight:700;font-size:0.9rem;margin-top:6px;padding-top:6px;border-top:1px solid rgba(96,165,250,0.2);">⚠ Mai ai de introdus '+fmt(Math.abs(monthDiff))+' pe luna asta</div>';
+    } else {
+      html+='<div style="color:var(--gold);font-size:0.85rem;margin-top:6px;padding-top:6px;border-top:1px solid rgba(96,165,250,0.2);">Ai '+fmt(monthDiff)+' în plus lunar</div>';
+    }
+
+    // Services
+    if(mResult.services&&mResult.services.length){
       html+='<div style="margin-top:8px;font-size:0.75rem;opacity:0.8;">';
-      result.services.forEach(function(s){
+      mResult.services.forEach(function(s){
         html+='<div style="display:flex;justify-content:space-between;padding:2px 0;">'+esc(s.name)+' ×'+s.count+' <span>'+fmt(s.income)+'</span></div>';
       });
       html+='</div>';
