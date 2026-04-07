@@ -1264,6 +1264,13 @@
       <button id="nextMonth">›</button>
       <button class="action-btn btn-green" id="openExportExcelBarber" style="flex:none;padding:6px 12px;font-size:0.75rem;">📊 Export</button>
     </div>
+    <!-- Mero suggestion box for barber -->
+    <div id="barberMeroBox" style="display:none;margin-bottom:14px;">
+      <div class="mero-suggestion" id="barberMeroSuggestion"></div>
+    </div>
+    <div style="margin-bottom:14px;">
+      <button class="action-btn btn-blue" id="barberMeroSync" style="width:100%;">📱 Sincronizează cu Mero</button>
+    </div>
     <div class="summary cols3">
       <div><div class="s-label">Total lună</div><div class="s-value big" id="bSumMonth">0 lei</div></div>
       <div><div class="s-label">Obiectiv 1</div><div class="s-value" id="bGoal">0 lei</div></div>
@@ -1617,12 +1624,7 @@ async function showAdminView(){
     document.getElementById('addStockBtn').addEventListener('click',addStockProduct);
     document.getElementById('adminSellBtn').addEventListener('click',adminSellProduct);
 
-    // Theme toggle
-    document.getElementById('themeToggle').addEventListener('click',function(){
-      document.body.classList.toggle('light');
-      localStorage.setItem('thecell_theme',document.body.classList.contains('light')?'light':'dark');
-      this.textContent=document.body.classList.contains('light')?'◐':'◑';
-    });
+    // Theme toggle - handled globally now
 
     // Anunțuri
     document.getElementById('addAnnounceBtn').addEventListener('click', async function(){
@@ -2444,7 +2446,14 @@ async function renderFinChart(){
   var saved=localStorage.getItem('thecell_theme');
   if(saved==='light') document.body.classList.add('light');
   var btn=document.getElementById('themeToggle');
-  if(btn) btn.textContent=document.body.classList.contains('light')?'◐':'◑';
+  if(btn){
+    btn.textContent=document.body.classList.contains('light')?'◐':'◑';
+    btn.addEventListener('click',function(){
+      document.body.classList.toggle('light');
+      localStorage.setItem('thecell_theme',document.body.classList.contains('light')?'light':'dark');
+      this.textContent=document.body.classList.contains('light')?'◐':'◑';
+    });
+  }
 })();
 
 async function addNewBarber(){
@@ -4173,12 +4182,119 @@ function renderNecesarList(containerId,items){
   });
 }
 
-// Init necesar for barber view too
+// Init necesar for barber view too + barber Mero sync
 var _origShowBarber=showBarberView;
+var barberMeroInitDone=false;
 showBarberView=async function(){
   await _origShowBarber();
   if(!necesarUnsub) initNecesar();
+  if(!barberMeroInitDone){
+    barberMeroInitDone=true;
+    var syncBtn=document.getElementById('barberMeroSync');
+    if(syncBtn) syncBtn.addEventListener('click',barberMeroSyncClick);
+  }
 };
+
+async function barberMeroSyncClick(){
+  var token=getMeroToken();
+  if(!token){
+    // Încercăm din localStorage
+    token=localStorage.getItem('meroToken')||'';
+    if(!token){
+      toast('Cere admin-ului token-ul Mero sau setează-l în tab-ul Mero (admin)','warning');
+      return;
+    }
+  }
+  var btn=document.getElementById('barberMeroSync');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Se sincronizează...'; }
+
+  try {
+    // Find this barber's Mero worker ID
+    var wId=null;
+    var bName=(barberData.name||'').toLowerCase();
+    var wMap={'florin':'65564d838fcbe845d716ebe7','casian':'6495e557f7354746387582dc',
+      'ionut':'632894e65e4e0cf7d4f9743f','ionuț':'632894e65e4e0cf7d4f9743f',
+      'nichitut':'632894e65e4e0cf7d4f9743f','nichituț':'632894e65e4e0cf7d4f9743f',
+      'patrick':'5da8bbe641ae460c8a5f06e5'};
+    for(var k in wMap){ if(bName.indexOf(k)!==-1){ wId=wMap[k]; break; } }
+
+    if(!wId){ toast('Nu s-a găsit frizerul în Mero','error'); return; }
+
+    // Get monthly data
+    var monthKey=viewMonth;
+    var p=monthKey.split('-'), yr=parseInt(p[0]), mo=parseInt(p[1]);
+    var from=yr+'-'+String(mo).padStart(2,'0')+'-01T00:00:00.000Z';
+    var lastDay=new Date(yr,mo,0).getDate();
+    var to=yr+'-'+String(mo).padStart(2,'0')+'-'+lastDay+'T23:59:59.999Z';
+
+    var resp=await meroPost(meroStatsUrl(from,to,wId));
+    var result=resp.result;
+    if(!result||!result.bookings){
+      toast('Nu sunt date Mero pentru luna asta','info');
+      document.getElementById('barberMeroBox').style.display='none';
+      return;
+    }
+
+    var meroIncome=result.bookings.finishedStats.income||0;
+    var meroCount=result.bookings.finishedStats.count||0;
+    var avgVal=result.clients?result.clients.averageBookingValue:0;
+
+    // Get app entries for comparison
+    var snap=await getDocs(query(collection(db,'entries'),where('barberId','==',currentUser.uid),where('month','==',monthKey)));
+    var appTotal=0;
+    snap.forEach(function(d){ appTotal+=d.data().amount; });
+
+    // Calculate breakdown
+    var bd=calcMeroBreakdown(meroIncome, barberData);
+    var isPatrick=bName.indexOf('patrick')!==-1;
+
+    // Build suggestion HTML
+    var box=document.getElementById('barberMeroBox');
+    var sugEl=document.getElementById('barberMeroSuggestion');
+    box.style.display='block';
+
+    var diff=appTotal-bd.adminShare;
+    var diffText='';
+    if(Math.abs(diff)<1){
+      diffText='<span style="color:var(--green);font-weight:700;">✓ Totul e corect!</span>';
+    } else if(diff>0){
+      diffText='<span style="color:var(--gold);">Ai introdus '+fmt(diff)+' în plus față de ce arată Mero.</span>';
+    } else {
+      diffText='<span style="color:var(--red);font-weight:700;">Mai ai de introdus '+fmt(Math.abs(diff))+'</span>';
+    }
+
+    var html='<div style="font-weight:700;margin-bottom:8px;">📱 Date Mero — '+MONTHS[mo-1]+' '+yr+'</div>';
+    html+='<div style="display:flex;gap:8px;margin-bottom:8px;">';
+    html+='<div style="flex:1;text-align:center;background:rgba(96,165,250,0.08);border-radius:8px;padding:6px;"><div style="font-size:0.55rem;text-transform:uppercase;letter-spacing:1px;opacity:0.7;">Mero brut</div><div style="font-family:Bebas Neue;font-size:1.1rem;">'+fmt(meroIncome)+'</div></div>';
+    if(!isPatrick){
+      html+='<div style="flex:1;text-align:center;background:rgba(74,222,128,0.08);border-radius:8px;padding:6px;"><div style="font-size:0.55rem;text-transform:uppercase;letter-spacing:1px;opacity:0.7;">Admin (de introdus)</div><div style="font-family:Bebas Neue;font-size:1.1rem;color:var(--green);">'+fmt(bd.adminShare)+'</div></div>';
+      html+='<div style="flex:1;text-align:center;background:rgba(96,165,250,0.08);border-radius:8px;padding:6px;"><div style="font-size:0.55rem;text-transform:uppercase;letter-spacing:1px;opacity:0.7;">Câștigul tău</div><div style="font-family:Bebas Neue;font-size:1.1rem;color:var(--blue);">'+fmt(bd.barberShare)+'</div></div>';
+    } else {
+      html+='<div style="flex:1;text-align:center;background:rgba(74,222,128,0.08);border-radius:8px;padding:6px;"><div style="font-size:0.55rem;text-transform:uppercase;letter-spacing:1px;opacity:0.7;">Total (100%)</div><div style="font-family:Bebas Neue;font-size:1.1rem;color:var(--green);">'+fmt(meroIncome)+'</div></div>';
+    }
+    html+='</div>';
+    html+='<div style="font-size:0.78rem;margin-bottom:4px;">Prag: <strong>'+bd.prag+'</strong></div>';
+    html+='<div style="font-size:0.78rem;margin-bottom:4px;">Programări finalizate: <strong>'+meroCount+'</strong> · Medie: <strong>'+(avgVal?avgVal.toFixed(0):0)+' lei</strong></div>';
+    html+='<div style="font-size:0.78rem;margin-bottom:4px;">Ai introdus în app: <strong>'+fmt(appTotal)+'</strong></div>';
+    html+='<div style="font-size:0.85rem;margin-top:8px;padding-top:8px;border-top:1px solid rgba(96,165,250,0.2);">'+diffText+'</div>';
+
+    // Services breakdown
+    if(result.services&&result.services.length){
+      html+='<div style="margin-top:8px;font-size:0.75rem;opacity:0.8;">';
+      result.services.forEach(function(s){
+        html+='<div style="display:flex;justify-content:space-between;padding:2px 0;">'+esc(s.name)+' ×'+s.count+' <span>'+fmt(s.income)+'</span></div>';
+      });
+      html+='</div>';
+    }
+
+    sugEl.innerHTML=html;
+    toast('Sincronizare Mero completă!','success');
+
+  } catch(e){
+    toast('Eroare Mero: '+e.message,'error');
+  }
+  if(btn){ btn.disabled=false; btn.textContent='📱 Sincronizează cu Mero'; }
+}
 
 </script>
 </body>
