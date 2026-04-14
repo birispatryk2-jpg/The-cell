@@ -7845,7 +7845,7 @@ async function meroSyncMonth(){
     renderMeroComparison(barbers,appEntries,meroData,allStats,monthKey,selectedDayData,dailyMonthData);
     updateMeroStatus('ok','Sincronizat - '+new Date().toLocaleTimeString('ro-RO'));
     toast('Sincronizare completa!','success');
-    await rerenderPreservingScroll(renderAdminView);
+    try { await renderAdminView(); postProcessAdminCards(); } catch(e){}
   } catch(e){ toast('Eroare: '+e.message,'error'); }
 }
 
