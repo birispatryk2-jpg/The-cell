@@ -2157,35 +2157,14 @@
     color:var(--red);
   }
   .barber-need-row{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    padding:10px 14px;
-    margin-top:8px;
-    border-radius:12px;
-    background:rgba(96,165,250,0.08);
-    border:1px solid rgba(96,165,250,0.15);
-    font-size:0.8rem;
+    display:flex;justify-content:space-between;align-items:center;
+    padding:10px 14px;margin-top:8px;border-radius:12px;
+    background:rgba(96,165,250,0.08);border:1px solid rgba(96,165,250,0.15);font-size:0.8rem;
   }
-  .barber-need-row.done{
-    background:rgba(74,222,128,0.08);
-    border-color:rgba(74,222,128,0.15);
-  }
-  .barber-need-label{
-    color:var(--accent2);
-    font-weight:500;
-  }
-  .barber-need-value{
-    font-weight:700;
-    color:var(--blue);
-    font-family:'Bebas Neue',sans-serif;
-    font-size:0.95rem;
-    letter-spacing:0.04em;
-  }
-  .barber-need-row.done .barber-need-label{
-    color:var(--green);
-    font-weight:600;
-  }
+  .barber-need-row.done{background:rgba(74,222,128,0.08);border-color:rgba(74,222,128,0.15);}
+  .barber-need-label{color:var(--accent2);font-weight:500;}
+  .barber-need-value{font-weight:700;color:var(--blue);font-family:'Bebas Neue',sans-serif;font-size:0.95rem;letter-spacing:0.04em;}
+  .barber-need-row.done .barber-need-label{color:var(--green);font-weight:600;}
   .barber-mero-line{
     padding:11px 13px;
     border-radius:14px;
@@ -3439,8 +3418,8 @@ function ensureHelperText(parent,id,text,beforeSelector){
 }
 
 function updateAdminMessagesBadge(){
-  var btn=document.querySelector('#adminView .tab-btn[data-tab="adminChat"]');
-  if(btn) btn.classList.toggle('unread',!!(adminUnreadChat||adminUnreadNotifs));
+  var tabBtn=document.querySelector('#adminView .tab-btn[data-tab="adminChat"]');
+  if(tabBtn) tabBtn.classList.toggle('unread',!!(adminUnreadChat||adminUnreadNotifs));
 }
 
 function applySimpleGlobalTweaks(){
@@ -3803,6 +3782,7 @@ function upgradeBarberMainCard(card){
   var vacCount=Number(card.dataset.vacCount||0);
   if(pendingCount) extraChips.push('<span class="barber-mini-chip">'+pendingCount+' in asteptare</span>');
   if(vacCount) extraChips.push('<span class="barber-mini-chip">'+vacCount+' zile libere</span>');
+
   var goalBadge=card.dataset.goalBadge?'<div class="card-goal-badge">'+esc(card.dataset.goalBadge)+'</div>':'';
   summary.innerHTML=
     '<div class="barber-main-head"><div class="barber-name">'+esc(card.dataset.barberName||'Frizer')+'</div>'+goalBadge+'</div>'+
@@ -3817,9 +3797,9 @@ function upgradeBarberMainCard(card){
       '<div class="barber-main-glance-card"><div class="barber-main-glance-label">'+esc(occupancyLabel)+'</div><div class="barber-main-glance-value '+occupancyClass+'">'+occupancyValue+'%</div></div>'+
       '<div class="barber-main-glance-card"><div class="barber-main-glance-label">Estimare</div><div class="barber-main-glance-value">'+fmt(card.dataset.estimate||0)+'</div></div>'+
     '</div>'+
-    (card.dataset.needed && card.dataset.needed!=='—' && card.dataset.needed!=='Obiective atinse'
+    (card.dataset.needed && card.dataset.needed!=='\u2014' && card.dataset.needed!=='Obiective atinse'
       ? '<div class="barber-need-row"><span class="barber-need-label">Mai ai nevoie</span><span class="barber-need-value">'+esc(card.dataset.needed)+'</span></div>'
-      : (card.dataset.needed==='Obiective atinse' ? '<div class="barber-need-row done"><span class="barber-need-label">✅ Obiective atinse</span></div>' : '')
+      : (card.dataset.needed==='Obiective atinse' ? '<div class="barber-need-row done"><span class="barber-need-label">\u2705 Obiective atinse</span></div>' : '')
     );
 
   [
@@ -7265,6 +7245,12 @@ function initTabs(containerSelector){
       }
       if(tabId==='adminNecesar'||tabId==='barberNecesar'){
         markStockSeen();
+      }
+      // Ascunde FAB pe taburi cu input (chat) ca sa nu blocheze butoanele
+      if(tabId==='adminChat'||tabId==='barberChat'||tabId==='adminNecesar'||tabId==='barberNecesar'){
+        setFloatingActionsVisible(false);
+      } else if(tabId==='adminMain'||tabId==='barberMain'){
+        setFloatingActionsVisible(true);
       }
     });
   });
