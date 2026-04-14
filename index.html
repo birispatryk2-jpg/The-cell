@@ -4158,6 +4158,8 @@ async function renderAdminView(){
   var renderVersion=++adminRenderVersion;
   var dateKey=getDate(), monthKey=dateKey.slice(0,7);
   if(adminInitDone) startAdminRealtimeListener();
+  // Încarcă automat datele Mero din cache (dacă există)
+  try { await loadMeroMonthState(monthKey); } catch(e){}
   var barbers=await getBarbers();
   if(renderVersion!==adminRenderVersion) return;
   var allEntries=await getAllEntriesForMonth(monthKey);
@@ -7843,6 +7845,7 @@ async function meroSyncMonth(){
     renderMeroComparison(barbers,appEntries,meroData,allStats,monthKey,selectedDayData,dailyMonthData);
     updateMeroStatus('ok','Sincronizat - '+new Date().toLocaleTimeString('ro-RO'));
     toast('Sincronizare completa!','success');
+    await rerenderPreservingScroll(renderAdminView);
   } catch(e){ toast('Eroare: '+e.message,'error'); }
 }
 
